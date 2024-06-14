@@ -100,7 +100,7 @@ async def fill_graph(llm_client,
 
     query_task_list = []
 
-    async def expand_node(node):
+    async def expand_node(query_id, node):
         query_prefix_token_ids = node.get_all_prefix_token_ids()
         next_token_dist_result = await llm_client.calc_next_token_dist(
             message_list,
@@ -119,7 +119,7 @@ async def fill_graph(llm_client,
             )
             result_nodes.append(new_node_model)
 
-        return result_nodes
+        return query_id, node, result_nodes
 
     query_num = 0
     while True:
@@ -130,10 +130,10 @@ async def fill_graph(llm_client,
 
         if len(done_task) > 0:
             for task in done_task:
-                result_nodes = task.result()
+                query_id, job_node, result_nodes = task.result()
                 for node_model in result_nodes:
                     graph.add_node(node_model)
-                    print(f'{query_num} {len(graph.expand_queue)} {len(graph.closed_node_list)} | {node_model.father_node_id} gen node: {node_model.id} {node_model.accum_prob:.6f} [{repr(graph.nodes[node_model.father_node_id].get_all_prefix_text())}] {node_model.token_info.token_id} {repr(node_model.token_info.token)} {node_model.token_info.eos}')
+                    print(f'{query_id} {len(graph.expand_queue)} {len(graph.closed_node_list)} | {job_node.model.id} gen node: {node_model.id} {node_model.accum_prob:.6f} [{repr(graph.nodes[node_model.father_node_id].get_all_prefix_text())}] {node_model.token_info.token_id} {repr(node_model.token_info.token)} {node_model.token_info.eos}')
                 query_task_list.remove(task)
 
         query_task_list = list(pending_task)
@@ -142,7 +142,7 @@ async def fill_graph(llm_client,
             node = graph.sort_and_get_next_expand_node()
             if node is None:
                 break
-            query_task_list.append(asyncio.create_task(expand_node(node)))
+            query_task_list.append(asyncio.create_task(expand_node(query_num, node)))
             query_num += 1
 
         if len(query_task_list) == 0:
@@ -175,7 +175,7 @@ def main():
         {"role": "user", "content": prompt},
     ]
     graph = asyncio.run(
-        fill_graph(client, message_list, temperature=0.8, top_p=0.9, max_query_num=10000)
+        fill_graph(client, message_list, temperature=0.8, top_p=0.9, max_query_num=20000)
     )
 
     for node in graph.nodes.values():
