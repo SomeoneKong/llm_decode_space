@@ -43,18 +43,23 @@ class LlmClient:
                                    top_p: float = 0.9,
                                    temperature: float = 0.8,
                                    ):
-        response = await self.client.chat.completions.create(
-            model=self.model_name,
-            messages=message_list,
-            temperature=temperature,
-            extra_body={
-                "force_answer_prefix_token_ids": prefix,
-                "output_log_prob_token_id": True,
-            },
-            max_tokens=1,
-            logprobs=True,
-            top_logprobs=20,
-        )
+        for i in range(3):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=message_list,
+                    temperature=temperature,
+                    extra_body={
+                        "force_answer_prefix_token_ids": prefix,
+                        "output_log_prob_token_id": True,
+                    },
+                    max_tokens=1,
+                    logprobs=True,
+                    top_logprobs=20,
+                )
+                break
+            except Exception as e:
+                print(f'error on run {i}: {e}')
 
         choices0 = response.choices[0]
         # print(choices0.finish_reason)
