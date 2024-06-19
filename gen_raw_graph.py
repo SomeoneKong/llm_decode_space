@@ -217,7 +217,8 @@ async def fill_graph(llm_client,
                 break
             query_task_list.append(asyncio.create_task(expand_node(query_num, node, graph)))
             query_num += 1
-            print(f'create query {query_num} query_task_list={len(query_task_list)} {len(graph.nodes)} {graph.expand_queue.qsize()}, {node.expand_rank_score():.6f} seq_len={node.model.seq_token_num} [{repr(graph.nodes[node.model.father_node_id].get_all_prefix_text()) if node.model.father_node_id is not None else ""}] {repr(node.model.token_info.token) if node.model.token_info is not None else ""}')
+            if node.father is not None:
+                print(f'create query {query_num} query_task_list={len(query_task_list)} {len(graph.nodes)} {graph.expand_queue.qsize()}, {node.expand_rank_score():.6f} seq_len={node.model.seq_token_num} [{repr(graph.nodes[node.model.father_node_id].get_all_prefix_text())}] {repr(node.model.token_info.token)} {node.model.token_info.logprob:.6f}')
 
             # 每次只添加一个，然后等下一轮（3s）
             break
@@ -242,9 +243,9 @@ C. 如果a、b都是实数，那么a+b=b+a
 
 D. 抛掷1个均匀的骰子，出现6点朝上
 
-请直接给出答案，不要解释，不要附带任何其他文本。
 '''.strip()
 
+prompt = 'python中是否有优先级队列？'
 
 def main():
     import asyncio
@@ -254,7 +255,7 @@ def main():
         {"role": "user", "content": prompt},
     ]
     graph = asyncio.run(
-        fill_graph(client, message_list, temperature=0.8, top_p=0.9, max_query_num=300)
+        fill_graph(client, message_list, temperature=0.8, top_p=0.9, max_query_num=300, parallel_job_num=10)
     )
 
     for node in graph.nodes.values():

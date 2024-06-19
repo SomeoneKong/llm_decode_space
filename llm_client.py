@@ -98,7 +98,7 @@ class LlmClient:
             },
             max_tokens=max_tokens,
             logprobs=True,
-            top_logprobs=100,
+            top_logprobs=50,
             stream=True,
         )
 
