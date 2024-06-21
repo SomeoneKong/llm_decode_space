@@ -8,6 +8,19 @@ from dataclasses import dataclass, field
 
 from llm_client import LlmClient, TokenProbInfo
 import openai
+import signal
+
+
+stop_signal = False
+
+
+def my_sigint_handler(signum, frame):
+    global stop_signal
+    stop_signal = True
+    print('SIGINT or CTRL-C detected. wait for current job to finish ...')
+
+
+signal.signal(signal.SIGINT, my_sigint_handler)
 
 
 class GraphNodeModel(BaseModel):
@@ -221,7 +234,7 @@ async def fill_graph(llm_client,
 
         query_task_list = list(pending_task)
 
-        while len(query_task_list) < parallel_job_num and query_num < max_query_num:
+        while len(query_task_list) < parallel_job_num and query_num < max_query_num and not stop_signal:
             node = graph.sort_and_get_next_expand_node()
             if node is None:
                 break
