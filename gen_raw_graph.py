@@ -7,6 +7,7 @@ from threading import Lock
 from dataclasses import dataclass, field
 
 from llm_client import LlmClient, TokenProbInfo
+import openai
 
 
 class GraphNodeModel(BaseModel):
@@ -121,6 +122,11 @@ class Graph:
 
         # print(f'add_nodes: {len(node_list)} {len(expand_node_list)} {len(closed_node_list)}')
 
+    def add_exist_node_to_expand_queue(self, node_model: GraphNodeModel):
+        node = self.nodes[node_model.id]
+        self.expand_queue.put(Graph.PrioritizedItem(priority= -node.expand_rank_score(), item=node))
+
+
     def sort_and_get_next_expand_node(self):
         try:
             item = self.expand_queue.get_nowait()
@@ -152,51 +158,55 @@ async def fill_graph(llm_client,
     query_task_list = []
 
     async def expand_node(query_id, node, graph: Graph):
-        query_prefix_token_ids = node.get_all_prefix_token_ids()
-        response_stream = llm_client.sample_trace_to_end_stream(
-            message_list,
-            query_prefix_token_ids,
-            prefix_logprob=node.model.accum_logprob,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=sample_max_tokens,
-        )
-
         current_node_model = node.model
 
-        async for delta_info in response_stream:
-            finished_reason = delta_info['finished_reason']
-            token_dist = delta_info['token_dist']
+        try:
+            query_prefix_token_ids = node.get_all_prefix_token_ids()
+            response_stream = llm_client.sample_trace_to_end_stream(
+                message_list,
+                query_prefix_token_ids,
+                prefix_logprob=node.model.accum_logprob,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=sample_max_tokens,
+            )
 
-            if finished_reason is None:
-                delta_token_id = delta_info['delta_token_id']
-            else:
-                delta_token_id = None
+            async for delta_info in response_stream:
+                finished_reason = delta_info['finished_reason']
+                token_dist = delta_info['token_dist']
 
-            next_node_model = None
-            result_nodes = []
-            expand_nodes = []
-            for token_prob in token_dist:
-                new_node_model = GraphNodeModel(
-                    father_node_id=current_node_model.id,
-                    token_info=token_prob,
-                    eos=token_prob.eos,
-                    accum_logprob=current_node_model.accum_logprob + token_prob.logprob,
-                    seq_token_num=current_node_model.seq_token_num + 1,
-                )
-                result_nodes.append(new_node_model)
-                if token_prob.token_id != delta_token_id:
-                    expand_nodes.append(new_node_model)
+                if finished_reason is None:
+                    delta_token_id = delta_info['delta_token_id']
                 else:
-                    next_node_model = new_node_model
+                    delta_token_id = None
 
-            graph.add_nodes(current_node_model.id, result_nodes, expand_nodes)
-            # print(f'{len(graph.nodes)} {len(graph.expand_queue)} {len(graph.closed_node_list)} | {current_node_model.id} gen node: seq_len={current_node_model.seq_token_num} [{repr(graph.nodes[current_node_model.id].get_all_prefix_text())}] token_dist={token_dist}')
+                next_node_model = None
+                result_nodes = []
+                expand_nodes = []
+                for token_prob in token_dist:
+                    new_node_model = GraphNodeModel(
+                        father_node_id=current_node_model.id,
+                        token_info=token_prob,
+                        eos=token_prob.eos,
+                        accum_logprob=current_node_model.accum_logprob + token_prob.logprob,
+                        seq_token_num=current_node_model.seq_token_num + 1,
+                    )
+                    result_nodes.append(new_node_model)
+                    if token_prob.token_id != delta_token_id:
+                        expand_nodes.append(new_node_model)
+                    else:
+                        next_node_model = new_node_model
 
-            current_node_model = next_node_model
-            assert current_node_model is None or current_node_model.id != - 1
-            if current_node_model is None:
-                break
+                graph.add_nodes(current_node_model.id, result_nodes, expand_nodes)
+                # print(f'{len(graph.nodes)} {len(graph.expand_queue)} {len(graph.closed_node_list)} | {current_node_model.id} gen node: seq_len={current_node_model.seq_token_num} [{repr(graph.nodes[current_node_model.id].get_all_prefix_text())}] token_dist={token_dist}')
+
+                current_node_model = next_node_model
+                assert current_node_model is None or current_node_model.id != - 1
+                if current_node_model is None:
+                    break
+        except openai.APIConnectionError as e:
+            graph.add_exist_node_to_expand_queue(current_node_model)
+            print(f'query {query_id} failed: {e}, add left node {current_node_model.id} [{current_node_model.token_info}] to queue')
 
     query_num = 0
     while True:
@@ -255,7 +265,7 @@ def main():
         {"role": "user", "content": prompt},
     ]
     graph = asyncio.run(
-        fill_graph(client, message_list, temperature=0.8, top_p=0.9, max_query_num=300, parallel_job_num=10)
+        fill_graph(client, message_list, temperature=0.8, top_p=0.9, max_query_num=1000, parallel_job_num=20)
     )
 
     for node in graph.nodes.values():
