@@ -243,8 +243,9 @@ async def fill_graph(llm_client,
             if node.father is not None:
                 print(f'create query {query_num} query_task_list={len(query_task_list)} {len(graph.nodes)} {graph.expand_queue.qsize()}, {node.expand_rank_score():.6f} seq_len={node.model.seq_token_num} [{repr(graph.nodes[node.model.father_node_id].get_all_prefix_text())}] {repr(node.model.token_info.token)} {node.model.token_info.logprob:.6f}')
 
-            # 每次只添加一个，然后等下一轮（3s）
-            break
+            if graph.expand_queue.qsize() < 30:
+                # 每次只添加一个，然后等下一轮（3s）
+                break
 
         if len(query_task_list) == 0:
             break
@@ -278,7 +279,7 @@ def main():
         {"role": "user", "content": prompt},
     ]
     graph = asyncio.run(
-        fill_graph(client, message_list, temperature=0.8, top_p=0.9, max_query_num=1000, parallel_job_num=20)
+        fill_graph(client, message_list, temperature=0.1, top_p=0.5, max_query_num=1000, parallel_job_num=20)
     )
 
     for node in graph.nodes.values():
