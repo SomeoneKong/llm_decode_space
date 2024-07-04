@@ -100,56 +100,57 @@ class LlmClient:
             logprobs=True,
             top_logprobs=50,
             stream=True,
+            timeout=20,
         )
 
         accum_prefix = prefix[:]
         accum_logprob = prefix_logprob
-        async for message in response:
-            choice0 = message.choices[0]
-            if choice0.delta.content is None:
-                continue
+        async with response:
+            async for message in response:
+                choice0 = message.choices[0]
+                if choice0.delta.content is None:
+                    continue
 
-            delta_token = choice0.delta.content
-            logprobs_info = choice0.logprobs.content[0]
-            delta_token_id = logprobs_info.token_id
-            delta_token_logprob = logprobs_info.logprob
-            top_token_dist = logprobs_info.top_logprobs
+                delta_token = choice0.delta.content
+                logprobs_info = choice0.logprobs.content[0]
+                delta_token_id = logprobs_info.token_id
+                delta_token_logprob = logprobs_info.logprob
+                top_token_dist = logprobs_info.top_logprobs
 
-            token_dist = [TokenProbInfo(
-                token_id=token_prob.token_id,
-                token=token_prob.token,
-                logprob=token_prob.logprob,
-                eos=token_prob.eos,
-                bytes=token_prob.bytes,
-            ) for token_prob in top_token_dist]
-            trimmed_token_dist = self.trim_prob_dist(token_dist, top_p)
+                token_dist = [TokenProbInfo(
+                    token_id=token_prob.token_id,
+                    token=token_prob.token,
+                    logprob=token_prob.logprob,
+                    eos=token_prob.eos,
+                    bytes=token_prob.bytes,
+                ) for token_prob in top_token_dist]
+                trimmed_token_dist = self.trim_prob_dist(token_dist, top_p)
 
-            delta_info = {
-                'prefix': accum_prefix[:],
-                'prefix_logprob': accum_logprob,
+                delta_info = {
+                    'prefix': accum_prefix[:],
+                    'prefix_logprob': accum_logprob,
 
-                'token_dist': trimmed_token_dist,
-                'all_token_dist': token_dist,
+                    'token_dist': trimmed_token_dist,
+                    'all_token_dist': token_dist,
 
-                'delta_token': delta_token,
-                'delta_token_id': delta_token_id,
-                'delta_token_logprob': delta_token_logprob,
-                'finished_reason': choice0.finish_reason,
-            }
+                    'delta_token': delta_token,
+                    'delta_token_id': delta_token_id,
+                    'delta_token_logprob': delta_token_logprob,
+                    'finished_reason': choice0.finish_reason,
+                }
 
-            out_of_top_p = delta_token_id not in [token_prob.token_id for token_prob in trimmed_token_dist]
-            if out_of_top_p:
-                delta_info['finished_reason'] = 'out_of_top_p'
+                out_of_top_p = delta_token_id not in [token_prob.token_id for token_prob in trimmed_token_dist]
+                if out_of_top_p:
+                    delta_info['finished_reason'] = 'out_of_top_p'
 
-            yield delta_info
+                yield delta_info
 
-            if out_of_top_p:
-                break
+                if out_of_top_p:
+                    break
 
-            accum_prefix.append(delta_token_id)
-            accum_logprob += delta_token_logprob
+                accum_prefix.append(delta_token_id)
+                accum_logprob += delta_token_logprob
 
-        await response.close()
 
     async def sample_trace_to_end_stream(
             self,
